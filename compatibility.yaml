@@ -10,7 +10,7 @@
 # All other consumers derive from this file. Do NOT hand-edit the derived
 # artefacts (README COMPAT block, CI workflow yaml, Kconfig defaults).
 
-module_version: 1.1.4
+module_version: 1.2.0
 
 zmk_known_good:
   # 跨 ZMK commit 6e7e0de2 ("feat(endpoints): add 'no endpoint' value (#3140)",
@@ -43,6 +43,11 @@ required_symbols:
 
   # keybeacon.c:231
   - name: zmk_ble_active_profile_is_open
+    header: zmk/ble.h
+    used_in: keybeacon.c
+
+  # keybeacon.c link_slot_read (KBP 1.2 AA4) —— per-connection peer→slot 解析
+  - name: zmk_ble_profile_index
     header: zmk/ble.h
     used_in: keybeacon.c
 

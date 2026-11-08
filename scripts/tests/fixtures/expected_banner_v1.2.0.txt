@@ -1,12 +1,12 @@
 ╔══════════════════════════════════════════════════════════════════════╗
-║  zmk-keybeacon 1.1.4 is INCOMPATIBLE with the current ZMK revision   ║
+║  zmk-keybeacon 1.2.0 is INCOMPATIBLE with the current ZMK revision   ║
 ╚══════════════════════════════════════════════════════════════════════╝
 
-Current ZMK:    cf5e36c  (/Users/wangyuting19/kbd/keybeacon/zmk-keybeacon/scripts/tests/fixtures/zmk-missing)
-Known-good:    [e844eca2 .. 4dd95d7]  (as of zmk-keybeacon 1.1.4 release)
+Current ZMK:    90dd318  (/Users/wangyuting19/kbd/zmk-keybeacon/scripts/tests/fixtures/zmk-missing)
+Known-good:    [e844eca2 .. 4dd95d7]  (as of zmk-keybeacon 1.2.0 release)
 
 Missing symbol: zmk_endpoints_selected
-  Location expected:  /Users/wangyuting19/kbd/keybeacon/zmk-keybeacon/scripts/tests/fixtures/zmk-missing/app/include/zmk/endpoints.h
+  Location expected:  /Users/wangyuting19/kbd/zmk-keybeacon/scripts/tests/fixtures/zmk-missing/app/include/zmk/endpoints.h
   Called from:        keybeacon.c
   Likely cause:       upstream ZMK renamed/removed this symbol after
                       4dd95d7 (see ZMK main-HEAD history).

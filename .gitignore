@@ -3,3 +3,8 @@
 
 # Local README backup snapshots
 .backup-readme/
+
+# Local Python venv for running scripts/tests (never committed)
+.venv/
+__pycache__/
+.pytest_cache/

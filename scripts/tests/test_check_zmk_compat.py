@@ -25,7 +25,7 @@ MODULE_ROOT = HERE.parent.parent
 CHECK_PY = MODULE_ROOT / "scripts" / "check_zmk_compat.py"
 COMPAT_YAML = MODULE_ROOT / "compatibility.yaml"
 FIXTURES = HERE / "fixtures"
-EXPECTED_BANNER = FIXTURES / "expected_banner_v1.1.4.txt"
+EXPECTED_BANNER = FIXTURES / "expected_banner_v1.2.0.txt"
 
 
 def _run(fixture: str, extra: list[str] | None = None) -> subprocess.CompletedProcess:
@@ -93,16 +93,16 @@ def test_escape_hatch_downgrades_fail_to_warn() -> None:
 # Byte-level banner regression (contract: fail-fast-banner.md "字节级稳定性")
 # -------------------------------------------------------------------------
 def test_banner_matches_fixture_missing() -> None:
-    """Byte-level stability of fail banner against expected_banner_v1.1.4.txt.
+    """Byte-level stability of fail banner against expected_banner_v1.2.0.txt.
 
     If this fails, review the diff carefully: if the banner change is
-    intentional, update `expected_banner_v1.1.4.txt` in the same PR.
+    intentional, update `expected_banner_v1.2.0.txt` in the same PR.
     """
     if not EXPECTED_BANNER.exists():
         pytest.skip(
             f"expected banner fixture not generated yet: {EXPECTED_BANNER}; "
             f"run `python3 scripts/check_zmk_compat.py --compat-file compatibility.yaml "
-            f"--zmk-root scripts/tests/fixtures/zmk-missing 2>fixtures/expected_banner_v1.1.4.txt` "
+            f"--zmk-root scripts/tests/fixtures/zmk-missing 2>fixtures/expected_banner_v1.2.0.txt` "
             f"and commit the file."
         )
     r = _run("zmk-missing")

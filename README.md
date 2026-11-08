@@ -32,8 +32,27 @@ live in the main project repository:
 | [Conformance kit](https://github.com/ykiewang/keybeacon/tree/main/conformance) | Guide, checklist, and self-test tool for keyboard authors |
 | [Roadmap](https://github.com/ykiewang/keybeacon#roadmap) | Candidate metrics planned for future KBP versions (battery, connection, WPM, …) |
 
-This module implements **KBP 1.1.0** (service `AA440AA0-…`, layer + modifiers, plus optional
-Connectivity and Battery characteristics added in 1.1).
+This module implements **KBP 1.2** (service `AA440AA0-…`, layer + modifiers, the optional
+Connectivity and Battery characteristics from 1.1, plus the optional per-connection Host-Link
+characteristic added in 1.2).
+
+## What's new in 1.2
+
+This release adds **one** optional, **read-only** GATT characteristic on the existing service
+`AA440AA0-…` (service UUID unchanged — a MINOR per KBP §9). Every byte of AA1/AA2/AA3 is
+identical to v1.1.x.
+
+- **Host-Link** (`AA440AA4-F5ED-4C48-84A1-8062D20D3D55`, 1 byte, **READ only — no NOTIFY/CCC**) —
+  `[0]` bits0–6 carry `local_link_profile`, the profile slot of **this** BLE connection (1-based;
+  `0` = not determined; bit7 reserved). A GATT read callback carries the originating connection,
+  so the firmware answers **each** host with its own slot — letting a host tell "in use on this
+  computer" from "active on another computer" with zero configuration. When the peer cannot be
+  resolved to a bonded profile, the firmware emits `0` (never a guess). Gated by
+  `CONFIG_ZMK_KEYBEACON_HOST_LINK=y` (default `y`, requires `CONFIG_ZMK_KEYBEACON_CONNECTIVITY`).
+
+To keep the exact KBP 1.1 wire shape (no AA4), set `CONFIG_ZMK_KEYBEACON_HOST_LINK=n`. The
+firmware-producer design lives in the sibling `keybeacon` repo under
+`specs/005-host-link-profile-awareness` (wire contract + macOS/Windows consumers there).
 
 ## What's new in 1.1
 
@@ -61,7 +80,7 @@ to its central `.conf`.
 | `CMakeLists.txt` | Module cmake entry; `include()`s `keybeacon.cmake` | No |
 | `keybeacon.c` | Shared GATT logic (service, read, change-detect, notify) | **No** |
 | `keybeacon.cmake` | Guarded `zephyr_library` snippet (symbol + BLE + central) | No |
-| `Kconfig.keybeacon` | Declares `CONFIG_ZMK_KEYBEACON` plus sub-options `CONFIG_ZMK_KEYBEACON_CONNECTIVITY` / `CONFIG_ZMK_KEYBEACON_BATTERY` (all bool; sub-options `default y`) | No |
+| `Kconfig.keybeacon` | Declares `CONFIG_ZMK_KEYBEACON` plus sub-options `CONFIG_ZMK_KEYBEACON_CONNECTIVITY` / `CONFIG_ZMK_KEYBEACON_BATTERY` / `CONFIG_ZMK_KEYBEACON_HOST_LINK` (all bool; sub-options `default y`) | No |
 | `CHANGELOG.md` | Semver history + versioning policy | No |
 
 ## Compatibility
@@ -167,8 +186,24 @@ KeyBeacon widget）能实时显示。它以 **Zephyr 模块**形式分发：消�
 | [一致性套件](https://github.com/ykiewang/keybeacon/tree/main/conformance) | 面向键盘作者的指南、清单与自测工具 |
 | [路线图](https://github.com/ykiewang/keybeacon#roadmap) | 规划中、面向未来 KBP 版本的候选指标(电量、连接、WPM……) |
 
-本模块实现 **KBP 1.1.0**（服务 `AA440AA0-…`，层 + 修饰键，并在 1.1 新增可选的 Connectivity
-与 Battery 特征）。
+本模块实现 **KBP 1.2**（服务 `AA440AA0-…`，层 + 修饰键，1.1 的可选 Connectivity 与 Battery
+特征，以及 1.2 新增的可选「每连接 Host-Link」特征）。
+
+## 1.2 版本新增
+
+本次发布在既有服务 `AA440AA0-…` 下新增**一个**可选的**只读** GATT 特征（服务 UUID 保持
+不变——按 KBP §9 属于 MINOR）。AA1/AA2/AA3 每一个字节与 v1.1.x 一致。
+
+- **Host-Link**（`AA440AA4-F5ED-4C48-84A1-8062D20D3D55`，1 字节，**只读——无 NOTIFY/CCC**）
+  —— `[0]` bits0–6 携带 `local_link_profile`，即**本** BLE 连接对应的 profile slot（1-based；
+  `0` = 未确定；bit7 保留）。GATT 读回调天然带发起连接，故固件对**每台**主机回答其自身 slot
+  ——使主机零配置地区分「正在此电脑使用」与「在另一台电脑使用」。当对端无法解析到已绑定
+  profile 时，固件发 `0`（绝不猜测）。由 `CONFIG_ZMK_KEYBEACON_HOST_LINK=y`（默认 `y`，依赖
+  `CONFIG_ZMK_KEYBEACON_CONNECTIVITY`）控制。
+
+若要保留与 KBP 1.1 完全一致的线上形状（无 AA4），设 `CONFIG_ZMK_KEYBEACON_HOST_LINK=n`。
+固件生产者设计位于兄弟仓库 `keybeacon` 的 `specs/005-host-link-profile-awareness`（wire 契约
+与 macOS/Windows 消费者在那里）。
 
 ## 1.1 版本新增
 
@@ -195,7 +230,7 @@ CCC、相同的发包节奏）；现有 KBP 1.0 主机行为不变。希望在 v
 | `CMakeLists.txt` | 模块 cmake 入口；`include()` 调用 `keybeacon.cmake` | 不 |
 | `keybeacon.c` | 共享 GATT 逻辑（服务、读取、变化检测、通知） | **不** |
 | `keybeacon.cmake` | 带守卫的 `zephyr_library` 片段（符号 + BLE + central） | 不 |
-| `Kconfig.keybeacon` | 声明 `CONFIG_ZMK_KEYBEACON` 以及子选项 `CONFIG_ZMK_KEYBEACON_CONNECTIVITY` / `CONFIG_ZMK_KEYBEACON_BATTERY`（都是 bool；子选项 `default y`） | 不 |
+| `Kconfig.keybeacon` | 声明 `CONFIG_ZMK_KEYBEACON` 以及子选项 `CONFIG_ZMK_KEYBEACON_CONNECTIVITY` / `CONFIG_ZMK_KEYBEACON_BATTERY` / `CONFIG_ZMK_KEYBEACON_HOST_LINK`（都是 bool；子选项 `default y`） | 不 |
 | `CHANGELOG.md` | semver 历史与版本策略 | 不 |
 
 ## 前提条件

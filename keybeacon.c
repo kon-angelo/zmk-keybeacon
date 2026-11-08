@@ -8,6 +8,10 @@
  *              (AA440AA3-…) characteristics, each gated by a Kconfig
  *              sub-option so a v1.1.0 module can emit a v1.0-equivalent
  *              GATT shape when both sub-options are disabled.
+ *   - KBP 1.2: optionally expose a per-connection Host-Link characteristic
+ *              (AA440AA4-…, READ only, no NOTIFY/CCC) that answers each bonded
+ *              host with ITS OWN profile slot, so a host can tell "in use
+ *              here" from "active on another computer" with zero config.
  *
  * This file is keyboard-independent and MUST NOT be edited to add the
  * feature to another keyboard — see README.md.
@@ -16,7 +20,9 @@
 #include <zephyr/kernel.h>
 #include <zephyr/init.h>
 #include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gatt.h>
+#include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
 #include <string.h>
 
@@ -26,7 +32,10 @@
 #include <zmk/events/layer_state_changed.h>
 #include <zmk/events/keycode_state_changed.h>
 
-#if IS_ENABLED(CONFIG_ZMK_KEYBEACON_CONNECTIVITY) || IS_ENABLED(CONFIG_ZMK_KEYBEACON_BATTERY)
+LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
+
+#if IS_ENABLED(CONFIG_ZMK_KEYBEACON_CONNECTIVITY) || IS_ENABLED(CONFIG_ZMK_KEYBEACON_BATTERY) || \
+    IS_ENABLED(CONFIG_ZMK_KEYBEACON_HOST_LINK)
 #include <zmk/ble.h>
 #include <zmk/events/ble_active_profile_changed.h>
 #endif
@@ -63,6 +72,11 @@
 #if IS_ENABLED(CONFIG_ZMK_KEYBEACON_BATTERY)
 #define KEYBEACON_BATT_UUID \
     BT_UUID_DECLARE_128(BT_UUID_128_ENCODE(0xAA440AA3, 0xF5ED, 0x4C48, 0x84A1, 0x8062D20D3D55))
+#endif
+
+#if IS_ENABLED(CONFIG_ZMK_KEYBEACON_HOST_LINK)
+#define KEYBEACON_LINK_UUID \
+    BT_UUID_DECLARE_128(BT_UUID_128_ENCODE(0xAA440AA4, 0xF5ED, 0x4C48, 0x84A1, 0x8062D20D3D55))
 #endif
 
 /* ================================================================== */
@@ -344,6 +358,54 @@ static void batt_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value
 #endif /* CONFIG_ZMK_KEYBEACON_BATTERY */
 
 /* ================================================================== */
+/* AA4 Host-Link characteristic (KBP 1.2, host-link-context)           */
+/*                                                                    */
+/*   READ only — no NOTIFY, no CCC. A GATT read callback carries the   */
+/*   originating `struct bt_conn *`, so the firmware answers EACH host */
+/*   with ITS OWN bonded profile slot. A broadcast NOTIFY would be     */
+/*   byte-identical across hosts; a read is inherently per-connection, */
+/*   which is the decisive signal that lets a host tell "in use here"  */
+/*   from "active on another computer" (FR-001/FR-004).                */
+/*                                                                    */
+/*   Wire (contracts/aa4-host-link.md HW-2.1):                         */
+/*     [0] local_link_profile                                          */
+/*         bits0-6: 1-based slot (0 = not determined, P-L2)            */
+/*         bit7   : reserved, MUST be 0 (P-L4)                         */
+/* ================================================================== */
+
+#if IS_ENABLED(CONFIG_ZMK_KEYBEACON_HOST_LINK)
+
+static ssize_t link_slot_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+                              uint16_t len, uint16_t offset) {
+    /* P-L2: 0 means this connection could not be resolved to a bonded slot. */
+    uint8_t slot = 0;
+
+    if (conn != NULL) {
+        const bt_addr_le_t *peer = bt_conn_get_dst(conn);
+        if (peer != NULL) {
+            int idx = zmk_ble_profile_index(peer);
+            if (idx >= 0) {
+                uint8_t one_based = (uint8_t)(idx + 1);
+                /* P-L3: never exceed profile_max_slots (AA2 [3]). */
+                if (one_based >= 1 && one_based <= (uint8_t)ZMK_BLE_PROFILE_COUNT) {
+                    slot = one_based & 0x7Fu; /* P-L4: bit7 stays 0 */
+                }
+            }
+        }
+    }
+
+    if (slot == 0) {
+        /* FR-003 / FR-013: exactly one structured diagnostic on the degradation
+         * path. DBG level so steady-state host polling does not spam the log. */
+        LOG_DBG("hostlink.unresolved: conn peer not bonded to any profile slot");
+    }
+
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, &slot, sizeof(slot));
+}
+
+#endif /* CONFIG_ZMK_KEYBEACON_HOST_LINK */
+
+/* ================================================================== */
 /* GATT service definition — all characteristics in one block.         */
 /* The AA1 BT_GATT_CHARACTERISTIC + BT_GATT_CCC lines are preserved    */
 /* byte-for-byte from v1.0.0 to guarantee FR-G1 (KBP 1.0 regression).  */
@@ -369,6 +431,14 @@ BT_GATT_SERVICE_DEFINE(keybeacon_svc,
                            BT_GATT_PERM_READ,
                            batt_read, NULL, NULL),
     BT_GATT_CCC(batt_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+#endif
+#if IS_ENABLED(CONFIG_ZMK_KEYBEACON_HOST_LINK)
+    /* AA4 appended LAST (and with no CCC) so every existing attr index —
+     * attrs[1] for AA1 notify, KBP_ATTR_AA2 / KBP_ATTR_AA3 — is unchanged. */
+    BT_GATT_CHARACTERISTIC(KEYBEACON_LINK_UUID,
+                           BT_GATT_CHRC_READ,
+                           BT_GATT_PERM_READ,
+                           link_slot_read, NULL, NULL),
 #endif
 );
 

@@ -49,7 +49,7 @@ EXIT_MANIFEST_LOAD = 3
 def symbol_present(
     zmk_root: Path, header: str, candidates: Iterable[str]
 ) -> tuple[bool, str | None]:
-    """Grep header for the first symbol candidate that is present.
+    r"""Grep header for the first symbol candidate that is present.
 
     Returns:
         (True, which_symbol) when any candidate matches `\bsym\s*\(` in the header.

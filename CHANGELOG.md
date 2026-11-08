@@ -19,6 +19,101 @@ All notable changes to the KeyBeacon Zephyr module are documented here. The modu
 Because consumers pin an exact tag, publishing a new version never affects an existing build
 until that consumer bumps its `revision`.
 
+## [1.2.0] — 2026-11-08
+
+**MINOR** release — adds the KBP 1.2 per-connection **Host-Link** characteristic
+(`AA440AA4-…`). Purely additive: the service UUID is unchanged and every byte of
+the KBP 1.0/1.1 characteristics (AA1/AA2/AA3) is bit-for-bit identical to v1.1.4.
+
+### Added
+
+- **AA4 Host-Link characteristic** (`AA440AA4-F5ED-4C48-84A1-8062D20D3D55`,
+  **READ only — no NOTIFY, no CCC**). Its 1-byte payload `[0]` carries
+  `local_link_profile` (bits0–6: the profile slot of **this** BLE connection,
+  1-based; `0` = not determined; bit7 reserved, 0). Because a GATT read callback
+  carries the originating `struct bt_conn *`, the firmware answers **each** host
+  with its own slot — so a host can tell "in use on this computer" from "active
+  on another computer" with zero configuration. A read is inherently
+  per-connection, so (unlike a broadcast NOTIFY) the value is never shared across
+  hosts. When the peer cannot be resolved to a bonded profile the firmware emits
+  `0` (never a guess) and logs one `hostlink.unresolved` diagnostic at DBG level.
+- `CONFIG_ZMK_KEYBEACON_HOST_LINK` (default `y`, `depends on
+  ZMK_KEYBEACON_CONNECTIVITY`) — gates the AA4 characteristic. Set it to `n` to
+  emit the exact KBP 1.1 GATT shape (no AA4).
+- `compatibility.yaml` — `zmk_ble_profile_index` (`zmk/ble.h`) added to
+  `required_symbols`; this is the ZMK API that maps a connection's peer address
+  to a bonded profile slot. `module_version` bumped `1.1.4` → `1.2.0`.
+
+### Fixed
+
+- `scripts/check_zmk_compat.py` — the `symbol_present` docstring is now a raw
+  string, silencing a `SyntaxWarning: invalid escape sequence '\s'` on Python
+  3.12+ that otherwise leaked into regenerated banner snapshots.
+
+### Backward compatibility
+
+- **Old host + new firmware**: a host that does not discover AA4 is unaffected;
+  AA1/AA2/AA3 parse byte-identically to v1.1.x.
+- **New host + old firmware**: a 1.2-aware host that finds no AA4 falls back to
+  link-level status and MUST NOT fabricate a slot (host-side obligation).
+- Existing `keybeacon_svc` attribute indices are unchanged: AA4 is appended last
+  and has no CCC, so the AA1 notify target and the AA2/AA3 notify indices are
+  byte-for-byte preserved.
+
+### Design & provenance
+
+- Firmware-producer half of `keybeacon` **specs/005-host-link-profile-awareness**
+  (the wire contract's source of truth and the macOS/Windows consumers live in
+  the sibling `keybeacon` repo). Implements its firmware obligations FR-001–FR-005,
+  FR-011–FR-016.
+- All 24 pytest cases green (`scripts/tests/`); `validate_compat.py` and
+  `regen_ci.py --check` pass.
+
+---
+
+## [1.2.0] — 2026-11-08（中文）
+
+**MINOR** 版本——新增 KBP 1.2 的「每连接主机上下文」特征（`AA440AA4-…`）。纯加法：
+service UUID 不变，KBP 1.0/1.1 既有特征（AA1/AA2/AA3）每一个字节与 v1.1.4 逐字节一致。
+
+### 新增
+
+- **AA4 Host-Link 特征**（`AA440AA4-F5ED-4C48-84A1-8062D20D3D55`，**只读——无
+  NOTIFY、无 CCC**）。其 1 字节 payload `[0]` 携带 `local_link_profile`（bits0–6：
+  **本** BLE 连接对应的 profile slot，1-based；`0` = 未确定；bit7 保留，为 0）。由于
+  GATT 读回调天然带发起连接的 `struct bt_conn *`，固件对**每台**主机回答其自身 slot
+  ——主机据此零配置地区分「正在此电脑使用」与「在另一台电脑使用」。读取天然是
+  per-connection 的，因此（不同于广播 NOTIFY）该值绝不会跨主机相同。当对端无法解析到
+  已绑定 profile 时，固件发 `0`（绝不猜测），并以 DBG 级打印一条 `hostlink.unresolved`
+  诊断。
+- `CONFIG_ZMK_KEYBEACON_HOST_LINK`（默认 `y`，`depends on
+  ZMK_KEYBEACON_CONNECTIVITY`）——门控 AA4 特征。设为 `n` 即输出与 KBP 1.1 完全一致的
+  GATT 形状（无 AA4）。
+- `compatibility.yaml` —— 把 `zmk_ble_profile_index`（`zmk/ble.h`）纳入
+  `required_symbols`；这是把连接对端地址映射到绑定 slot 的 ZMK API。`module_version`
+  由 `1.1.4` 升为 `1.2.0`。
+
+### 修复
+
+- `scripts/check_zmk_compat.py` —— `symbol_present` 文档字符串改为 raw 字符串，消除
+  Python 3.12+ 下 `SyntaxWarning: invalid escape sequence '\s'`（否则会混入重新生成的
+  banner 快照）。
+
+### 向后兼容
+
+- **老主机 + 新固件**：发现不到 AA4 的主机行为不变；AA1/AA2/AA3 与 v1.1.x 逐字节一致。
+- **新主机 + 老固件**：支持 1.2 的主机若未发现 AA4，降级到链路级状态，且不得臆造 slot
+  （主机侧义务）。
+- 既有 `keybeacon_svc` 属性索引不变：AA4 追加在末尾且无 CCC，故 AA1 的 notify 目标与
+  AA2/AA3 的 notify 索引逐字节保持。
+
+### 设计与来源
+
+- 为 `keybeacon` 仓库 **specs/005-host-link-profile-awareness** 的固件生产者部分（wire
+  契约真相源与 macOS/Windows 消费者在兄弟仓库 `keybeacon`）。实现其固件义务
+  FR-001–FR-005、FR-011–FR-016。
+- `scripts/tests/` 24 条 pytest 全绿；`validate_compat.py` 与 `regen_ci.py --check` 通过。
+
 ## [1.1.4] — 2026-10-13
 
 **PATCH** release — ZMK API forward-compat + build-time revision compatibility contract.

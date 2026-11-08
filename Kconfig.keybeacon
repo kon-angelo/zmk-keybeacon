@@ -24,6 +24,23 @@ config ZMK_KEYBEACON_BATTERY
       1 byte overall on integer boards, 2 bytes [left, right] on splits.
       255 = read failed / temporarily unavailable. See KBP 1.1 §14.4.
 
+config ZMK_KEYBEACON_HOST_LINK
+    bool "KeyBeacon 1.2: expose per-connection Host-Link characteristic (AA440AA4-…)"
+    depends on ZMK_KEYBEACON_CONNECTIVITY
+    default y
+    help
+      Expose a READ-only GATT characteristic whose value is THIS BLE
+      connection's profile slot (byte[0] bits0–6, 1-based; 0 = not
+      determined). A GATT read is inherently per-connection, so each bonded
+      host learns its own slot with zero configuration, then compares it with
+      the broadcast active slot (AA2) to tell "in use here" from "active on
+      another computer". The characteristic has no NOTIFY and no CCC, which
+      physically rules out broadcast-frame contamination. When the peer cannot
+      be resolved to a bonded profile the firmware emits 0 (never a guess).
+      Depends on CONNECTIVITY because a host needs AA2's active slot/output to
+      make the comparison. See KBP 1.2 §14 (host-link context).
+
+
 config ZMK_KEYBEACON_ALLOW_INCOMPATIBLE_ZMK
     bool "Allow building against an incompatible ZMK revision (ADVANCED)"
     depends on ZMK_KEYBEACON
