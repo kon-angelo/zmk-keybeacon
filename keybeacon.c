@@ -31,6 +31,9 @@
 #include <zmk/event_manager.h>
 #include <zmk/events/layer_state_changed.h>
 #include <zmk/events/keycode_state_changed.h>
+#include <zmk/events/endpoint_changed.h>
+
+#include "keybeacon_security.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -42,7 +45,6 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #if IS_ENABLED(CONFIG_ZMK_KEYBEACON_CONNECTIVITY)
 #include <zmk/endpoints.h>
-#include <zmk/events/endpoint_changed.h>
 #endif
 
 #if IS_ENABLED(CONFIG_ZMK_KEYBEACON_CONNECTIVITY) || IS_ENABLED(CONFIG_ZMK_KEYBEACON_BATTERY)
@@ -83,28 +85,28 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 /* Attribute-index map (data-model §E5)                                */
 /*                                                                    */
 /*   Index 0: Primary service decl                                    */
-/*   Index 1: AA1 chrc decl    (v1.0.0 bt_gatt_notify target)         */
-/*   Index 2: AA1 chrc value                                          */
+/*   Index 1: AA1 chrc decl                                           */
+/*   Index 2: AA1 chrc value   (notify target, enforces permissions)  */
 /*   Index 3: AA1 CCC                                                 */
-/*   Index 4: AA2 chrc decl    (new, if CONNECTIVITY=y)               */
-/*   Index 5: AA2 chrc value                                          */
+/*   Index 4: AA2 chrc decl    (if CONNECTIVITY=y)                    */
+/*   Index 5: AA2 chrc value   (notify target)                        */
 /*   Index 6: AA2 CCC                                                 */
-/*   Index 7: AA3 chrc decl    (if CONNECTIVITY=y AND BATTERY=y)      */
-/*   Index 4: AA3 chrc decl    (if CONNECTIVITY=n AND BATTERY=y)      */
+/*   Index 8: AA3 chrc value   (if CONNECTIVITY=y AND BATTERY=y)      */
+/*   Index 5: AA3 chrc value   (if CONNECTIVITY=n AND BATTERY=y)      */
 /*                                                                    */
-/*   The AA3 index collapses from 7→4 when AA2 is disabled so the     */
+/*   The AA3 index collapses from 8→5 when AA2 is disabled so the     */
 /*   unusual Kconfig combination [KEYBEACON=y, CONNECTIVITY=n,        */
 /*   BATTERY=y] still resolves correctly.                             */
 /* ================================================================== */
 
 #if IS_ENABLED(CONFIG_ZMK_KEYBEACON_CONNECTIVITY)
-#define KBP_ATTR_AA2 4
+#define KBP_ATTR_AA2 5
 #endif
 #if IS_ENABLED(CONFIG_ZMK_KEYBEACON_BATTERY)
 #  if IS_ENABLED(CONFIG_ZMK_KEYBEACON_CONNECTIVITY)
-#    define KBP_ATTR_AA3 7
+#    define KBP_ATTR_AA3 8
 #  else
-#    define KBP_ATTR_AA3 4
+#    define KBP_ATTR_AA3 5
 #  endif
 #endif
 
@@ -124,7 +126,7 @@ static uint8_t payload_len_buf;
 
 static ssize_t read_status(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
                            uint16_t len, uint16_t offset) {
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, payload_cache, payload_len_cache);
+    return kbp_read(conn, attr, buf, len, offset, payload_cache, payload_len_cache, true);
 }
 
 static void ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value) {}
@@ -291,8 +293,8 @@ static void conn_build_payload(uint8_t *buf) {
 
 static ssize_t conn_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
                          uint16_t len, uint16_t offset) {
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, conn_payload_cache,
-                             sizeof(conn_payload_cache));
+    return kbp_read(conn, attr, buf, len, offset, conn_payload_cache,
+                    sizeof(conn_payload_cache), false);
 }
 
 static void conn_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value) {}
@@ -349,8 +351,8 @@ static void batt_build_payload(uint8_t *buf) {
 
 static ssize_t batt_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
                          uint16_t len, uint16_t offset) {
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, batt_payload_cache,
-                             sizeof(batt_payload_cache));
+    return kbp_read(conn, attr, buf, len, offset, batt_payload_cache,
+                    sizeof(batt_payload_cache), false);
 }
 
 static void batt_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value) {}
@@ -377,6 +379,9 @@ static void batt_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value
 
 static ssize_t link_slot_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
                               uint16_t len, uint16_t offset) {
+    if (kbp_host_profile(conn) < 0) {
+        return BT_GATT_ERR(BT_ATT_ERR_AUTHORIZATION);
+    }
     /* P-L2: 0 means this connection could not be resolved to a bonded slot. */
     uint8_t slot = 0;
 
@@ -407,37 +412,36 @@ static ssize_t link_slot_read(struct bt_conn *conn, const struct bt_gatt_attr *a
 
 /* ================================================================== */
 /* GATT service definition — all characteristics in one block.         */
-/* The AA1 BT_GATT_CHARACTERISTIC + BT_GATT_CCC lines are preserved    */
-/* byte-for-byte from v1.0.0 to guarantee FR-G1 (KBP 1.0 regression).  */
+/* Wire payloads remain KBP 1.x compatible; access requires encryption. */
 /* ================================================================== */
 
 BT_GATT_SERVICE_DEFINE(keybeacon_svc,
     BT_GATT_PRIMARY_SERVICE(KEYBEACON_SERVICE_UUID),
     BT_GATT_CHARACTERISTIC(KEYBEACON_CHRC_UUID,
                            BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-                           BT_GATT_PERM_READ,
+                           BT_GATT_PERM_READ_ENCRYPT,
                            read_status, NULL, NULL),
-    BT_GATT_CCC(ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+    BT_GATT_CCC(ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 #if IS_ENABLED(CONFIG_ZMK_KEYBEACON_CONNECTIVITY)
     BT_GATT_CHARACTERISTIC(KEYBEACON_CONN_UUID,
                            BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-                           BT_GATT_PERM_READ,
+                           BT_GATT_PERM_READ_ENCRYPT,
                            conn_read, NULL, NULL),
-    BT_GATT_CCC(conn_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+    BT_GATT_CCC(conn_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 #endif
 #if IS_ENABLED(CONFIG_ZMK_KEYBEACON_BATTERY)
     BT_GATT_CHARACTERISTIC(KEYBEACON_BATT_UUID,
                            BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-                           BT_GATT_PERM_READ,
+                           BT_GATT_PERM_READ_ENCRYPT,
                            batt_read, NULL, NULL),
-    BT_GATT_CCC(batt_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+    BT_GATT_CCC(batt_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 #endif
 #if IS_ENABLED(CONFIG_ZMK_KEYBEACON_HOST_LINK)
     /* AA4 appended LAST (and with no CCC) so every existing attr index —
-     * attrs[1] for AA1 notify, KBP_ATTR_AA2 / KBP_ATTR_AA3 — is unchanged. */
+     * attrs[2] for AA1 notify, KBP_ATTR_AA2 / KBP_ATTR_AA3 — is unchanged. */
     BT_GATT_CHARACTERISTIC(KEYBEACON_LINK_UUID,
                            BT_GATT_CHRC_READ,
-                           BT_GATT_PERM_READ,
+                           BT_GATT_PERM_READ_ENCRYPT,
                            link_slot_read, NULL, NULL),
 #endif
 );
@@ -463,10 +467,10 @@ static void build_payload(uint8_t *buf, uint8_t *len) {
     *len = PAYLOAD_HEADER_LEN + name_len;
 }
 
-static void update_and_notify(void) {
+static void update_and_notify(bool refresh_hosts) {
     build_payload(payload_buf, &payload_len_buf);
 
-    if (payload_len_buf == payload_len_cache &&
+    if (!refresh_hosts && payload_len_buf == payload_len_cache &&
         memcmp(payload_buf, payload_cache, payload_len_buf) == 0) {
         return;
     }
@@ -474,17 +478,20 @@ static void update_and_notify(void) {
     memcpy(payload_cache, payload_buf, payload_len_buf);
     payload_len_cache = payload_len_buf;
 
-    bt_gatt_notify(NULL, &keybeacon_svc.attrs[1], payload_cache, payload_len_cache);
+    kbp_notify(&keybeacon_svc.attrs[2], payload_cache, payload_len_cache, true, refresh_hosts);
 }
 
 static int keybeacon_cb(const zmk_event_t *eh) {
-    update_and_notify();
+    /* Switching profile/output sends the new active host a snapshot and clears
+     * stale input on other hosts. Typing events never notify inactive hosts. */
+    update_and_notify(as_zmk_endpoint_changed(eh) != NULL);
     return ZMK_EV_EVENT_BUBBLE;
 }
 
 ZMK_LISTENER(keybeacon, keybeacon_cb);
 ZMK_SUBSCRIPTION(keybeacon, zmk_layer_state_changed);
 ZMK_SUBSCRIPTION(keybeacon, zmk_keycode_state_changed);
+ZMK_SUBSCRIPTION(keybeacon, zmk_endpoint_changed);
 
 /* ================================================================== */
 /* AA2 Connectivity update + notify + listener                         */
@@ -498,8 +505,8 @@ static void conn_update_and_notify(void) {
         return;
     }
     memcpy(conn_payload_cache, conn_payload_buf, sizeof(conn_payload_cache));
-    bt_gatt_notify(NULL, &keybeacon_svc.attrs[KBP_ATTR_AA2], conn_payload_cache,
-                   sizeof(conn_payload_cache));
+    kbp_notify(&keybeacon_svc.attrs[KBP_ATTR_AA2], conn_payload_cache,
+                sizeof(conn_payload_cache), false, false);
 }
 
 static int conn_cb(const zmk_event_t *eh) {
@@ -548,8 +555,8 @@ static void batt_update_and_notify(bool event_driven) {
     }
     memcpy(batt_payload_cache, batt_payload_buf, sizeof(batt_payload_cache));
     batt_last_emit_ms = now;
-    bt_gatt_notify(NULL, &keybeacon_svc.attrs[KBP_ATTR_AA3], batt_payload_cache,
-                   sizeof(batt_payload_cache));
+    kbp_notify(&keybeacon_svc.attrs[KBP_ATTR_AA3], batt_payload_cache,
+                sizeof(batt_payload_cache), false, false);
 }
 
 static int batt_cb(const zmk_event_t *eh) {

@@ -49,6 +49,9 @@ on:
       - scripts/requirements-dev.txt
       - .github/workflows/zmk-main-compat.yml
       - keybeacon.c
+      - keybeacon_security.c
+      - keybeacon_security.h
+      - keybeacon.cmake
       - Kconfig.keybeacon
 
 jobs:
